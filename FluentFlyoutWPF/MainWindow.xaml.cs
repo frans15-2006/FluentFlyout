@@ -229,6 +229,19 @@ public partial class MainWindow : MicaWindow
         mediaManager.OnAnyTimelinePropertyChanged += MediaManager_OnAnyTimelinePropertyChanged;
         mediaManager.OnAnySessionClosed += MediaManager_OnAnySessionClosed;
 
+        // Monitor power-off and lock/unlock destroy or reshuffle the taskbar's
+        // child windows without sending us WM_DISPLAYCHANGE, so the widget was
+        // silently gone after unlocking (#983). Rebuild placement on resume.
+        try
+        {
+            SystemEvents.SessionSwitch += OnSystemSessionSwitch;
+            SystemEvents.PowerModeChanged += OnSystemPowerModeChanged;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn(ex, "Failed to register SystemEvents handlers for window recovery");
+        }
+
         WM_TASKBARCREATED = RegisterWindowMessage("TaskbarCreated");
         WM_SHELLHOOK = RegisterWindowMessage("SHELLHOOK");
         RegisterShellHookWindow(new WindowInteropHelper(this).Handle);
@@ -1746,6 +1759,16 @@ public partial class MainWindow : MicaWindow
             _displayRefreshTimer.Stop();
             _displayRefreshTimer.Tick -= DisplayRefreshTimer_Tick;
 
+            try
+            {
+                SystemEvents.SessionSwitch -= OnSystemSessionSwitch;
+                SystemEvents.PowerModeChanged -= OnSystemPowerModeChanged;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to unregister SystemEvents handlers");
+            }
+
             // unsubscribe from events
             mediaManager.OnAnyMediaPropertyChanged -= MediaManager_OnAnyMediaPropertyChanged;
             mediaManager.OnAnyPlaybackStateChanged -= CurrentSession_OnPlaybackStateChanged;
@@ -1862,6 +1885,21 @@ public partial class MainWindow : MicaWindow
         _displayRefreshTimer.Stop();
         _displayRefreshTimer.Start();
         Logger.Debug($"Scheduled display environment refresh: {reason}");
+    }
+
+    private void OnSystemSessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon
+            or SessionSwitchReason.RemoteConnect or SessionSwitchReason.ConsoleConnect)
+        {
+            ScheduleDisplayEnvironmentRefresh($"session switch: {e.Reason}");
+        }
+    }
+
+    private void OnSystemPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+            ScheduleDisplayEnvironmentRefresh("power resume");
     }
 
     private void DisplayRefreshTimer_Tick(object? sender, EventArgs e)
