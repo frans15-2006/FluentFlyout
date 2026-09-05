@@ -83,11 +83,15 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
 
         System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            AttachDevice(AudioDeviceMonitor.Instance.GetDeviceById(e.DeviceId));
+            // GetDeviceById returns null when the reported id is empty or already
+            // gone; attaching null would leave the mixer permanently detached and
+            // the flyout frozen, so fall back to the current default endpoint.
+            var device = AudioDeviceMonitor.Instance.GetDeviceById(e.DeviceId)
+                         ?? AudioDeviceMonitor.Instance.GetDefaultRenderDevice();
+            AttachDevice(device);
         });
     }
 
-<<<<<<< HEAD
     private void OnSessionVolumeChanged(object? sender, EventArgs e)
     {
         SessionVolumeChanged?.Invoke(sender, e);
@@ -99,7 +103,8 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
             session.VolumeChanged -= OnSessionVolumeChanged;
 
         Sessions.Clear();
-=======
+    }
+
     private void TryRegisterSystemEvents()
     {
         try
@@ -169,7 +174,6 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
                 Logger.Error(ex, "Volume mixer resume recovery failed");
             }
         });
->>>>>>> d8793a5 (Fix #1071: recover visualizer + volume mixer after S3 sleep/resume)
     }
 
 
@@ -201,6 +205,7 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
 
     public bool TryAdjustMasterVolume(float delta)
     {
+        EnsureDeviceAttached();
         if (_device == null) return false;
 
         MasterVolume = Math.Clamp(MasterVolume + delta, 0f, 1f);
@@ -224,18 +229,78 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
     }
 
 
+    /// <summary>
+    /// Re-resolves the default render endpoint when we have none. The device can
+    /// be missing because it wasn't ready yet when the mixer was constructed
+    /// (early startup) or because a previous attach failed; without this the
+    /// view model stays permanently detached and the flyout shows a frozen
+    /// volume value while the system volume keeps changing (#1086).
+    /// </summary>
+    private void EnsureDeviceAttached()
+    {
+        if (_device != null) return;
+
+        try
+        {
+            var device = AudioDeviceMonitor.Instance.GetDefaultRenderDevice();
+            if (device == null) return;
+
+            Logger.Info("Volume mixer had no audio endpoint, attaching default render device");
+            AttachDevice(device);
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Failed to lazily attach default render device");
+        }
+    }
+
     public void SyncMasterFromDevice()
     {
-        if (_device == null) return;
+        if (_device == null)
+        {
+            var app0 = System.Windows.Application.Current;
+            if (app0?.Dispatcher != null && !app0.Dispatcher.CheckAccess())
+            {
+                _ = app0.Dispatcher.InvokeAsync(SyncMasterFromDevice);
+                return;
+            }
 
-        var vol = _device.AudioEndpointVolume.MasterVolumeLevelScalar;
-        var mute = _device.AudioEndpointVolume.Mute;
+            EnsureDeviceAttached();
+            if (_device == null) return;
+        }
 
-        if (MathF.Abs(MasterVolume - vol) > 0.001f)
+        try
+        {
+            var app = System.Windows.Application.Current;
+            if (app?.Dispatcher != null && !app.Dispatcher.CheckAccess())
+            {
+                _ = app.Dispatcher.InvokeAsync(SyncMasterFromDevice);
+                return;
+            }
+
+            float vol;
+            bool mute;
+            try
+            {
+                vol = _device.AudioEndpointVolume.MasterVolumeLevelScalar;
+                mute = _device.AudioEndpointVolume.Mute;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to read master volume from device");
+                return;
+            }
+
+            if (MathF.Abs(MasterVolume - vol) > 0.001f)
             MasterVolume = vol;
 
         if (IsMasterMuted != mute)
             IsMasterMuted = mute;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to sync master volume from device");
+        }
     }
 
 
