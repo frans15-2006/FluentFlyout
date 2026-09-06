@@ -204,10 +204,27 @@ public partial class MainWindow : MicaWindow
 
         if (SettingsManager.Current.Startup == true) // add to startup programs if enabled, needs improvement
         {
-            RegistryKey? key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true);
-            string? executablePath = Environment.ProcessPath;
-            if (key != null && executablePath != null)
-                key.SetValue("FluentFlyout", executablePath);
+            // This block used to run unguarded on every launch: a SecurityException
+            // (locked-down policy, AV tamper protection) killed startup, and the
+            // RegistryKey handle leaked. Dispose the key, guard the write, and
+            // only rewrite when the stored value actually differs.
+            try
+            {
+                string? executablePath = Environment.ProcessPath;
+                if (executablePath != null)
+                {
+                    using RegistryKey? key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", true);
+                    if (key != null
+                        && !string.Equals(key.GetValue("FluentFlyout") as string, executablePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        key.SetValue("FluentFlyout", executablePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex, "Failed to register FluentFlyout in the Run key");
+            }
         }
 
         // display tray icon if enabled
