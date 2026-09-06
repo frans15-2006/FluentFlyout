@@ -107,6 +107,8 @@ public partial class MainWindow : MicaWindow
     private bool _isActive;
     private bool _isDragging;
     private bool _isHiding = true;
+    private SolidColorBrush? _playPauseAccentBrush;
+    private SolidColorBrush? _playPauseHoverBrush;
 
     private LockWindow? lockWindow;
     private DateTime _lastSelfUpdateTimestamp = DateTime.MinValue;
@@ -471,23 +473,56 @@ public partial class MainWindow : MicaWindow
 
     public async Task<bool> TrySkipPreviousAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TrySkipPreviousAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TrySkipPreviousAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send previous-track command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TryTogglePlayPauseAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TryTogglePlayPauseAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TryTogglePlayPauseAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send play/pause command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TrySkipNextAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TrySkipNextAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TrySkipNextAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send next-track command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TryOpenMediaPlayerAsync()
@@ -941,6 +976,31 @@ public partial class MainWindow : MicaWindow
         storyboard.Begin(window);
     }
 
+    /// <summary>
+    /// Resolves a non-empty display title for a media session. Some players
+    /// (ytmdesktop2, certain UWP SMTC bridges) publish an empty Title while the
+    /// session is otherwise valid; fall back to the resolved process/app name
+    /// so the flyout and taskbar widget aren't blank (#608).
+    /// </summary>
+    private static string ResolveDisplayTitle(MediaSession session, string? title)
+    {
+        if (!string.IsNullOrWhiteSpace(title))
+            return title;
+
+        try
+        {
+            string? appName = MediaPlayerData.GetAndCacheMediaPlayerData(session.Id).Item1;
+            if (!string.IsNullOrWhiteSpace(appName))
+                return appName;
+        }
+        catch
+        {
+            // process lookup can fail for elevated/packaged apps; fall through
+        }
+
+        return string.IsNullOrWhiteSpace(session.Id) ? string.Empty : session.Id;
+    }
+
     public void UpdateTaskbar()
     {
         var activeSession = GetActiveMediaSession();
@@ -957,7 +1017,12 @@ public partial class MainWindow : MicaWindow
         var playbackInfo = TryGetPlaybackInfo(activeSession.ControlSession);
         var thumbnail = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
         BitmapHelper.GetDominantColors(1);
-        taskbarWindow?.UpdateUi(songInfo.Title, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
+        taskbarWindow?.UpdateUi(
+            ResolveDisplayTitle(activeSession, songInfo.Title),
+            songInfo.Artist,
+            thumbnail,
+            playbackInfo?.PlaybackStatus,
+            playbackInfo?.Controls);
     }
 
     public void reportBug(object? sender, EventArgs e)
@@ -1031,7 +1096,12 @@ public partial class MainWindow : MicaWindow
             BitmapHelper.GetDominantColors(1);
             var tbPlayback = TryGetPlaybackInfo(focusedSession.ControlSession);
 
-            taskbarWindow?.UpdateUi(tbSongInfo.Title, tbSongInfo.Artist, tbThumbnail, tbPlayback?.PlaybackStatus, tbPlayback?.Controls);
+            taskbarWindow?.UpdateUi(
+                ResolveDisplayTitle(focusedSession, tbSongInfo.Title),
+                tbSongInfo.Artist,
+                tbThumbnail,
+                tbPlayback?.PlaybackStatus,
+                tbPlayback?.Controls);
         }
 
         if (IsVisible)
@@ -1082,9 +1152,15 @@ public partial class MainWindow : MicaWindow
         // album art with no title/artist until the song was changed manually,
         // and poisoned the dedupe cache so the real update was suppressed
         // (#961). Ignore the blank interim state while the session is alive.
+        // Only suppress blank interim metadata when we already have a non-blank
+        // title cached for this session. Players that never publish a title
+        // (ytmdesktop2, #608) must still fall through so ResolveDisplayTitle
+        // can show the process name.
         if (string.IsNullOrWhiteSpace(songInfo.Title) && string.IsNullOrWhiteSpace(songInfo.Artist)
             && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed
-            && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)
+            && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped
+            && previousMediaProperty.StartsWith(mediaSession.Id + "\0", StringComparison.Ordinal)
+            && previousMediaProperty.Length > mediaSession.Id.Length + 1)
         {
             return;
         }
@@ -1108,7 +1184,8 @@ public partial class MainWindow : MicaWindow
         var thumbnail = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
         BitmapHelper.GetDominantColors(1);
 
-        taskbarWindow?.UpdateUi(songInfo.Title, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
+        string displayTitle = ResolveDisplayTitle(currentActiveSession, songInfo.Title);
+        taskbarWindow?.UpdateUi(displayTitle, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
 
         pauseOtherMediaSessionsIfNeeded(mediaSession);
 
@@ -1633,11 +1710,14 @@ public partial class MainWindow : MicaWindow
                 BackgroundImageStyle2.Visibility = SettingsManager.Current.MediaFlyoutBackgroundBlur == 2 ? Visibility.Visible : Visibility.Collapsed;
                 BackgroundImageStyle3.Visibility = SettingsManager.Current.MediaFlyoutBackgroundBlur == 3 ? Visibility.Visible : Visibility.Collapsed;
 
-                // color play/pause button
+                // color play/pause button + seekbar from album-art accent (or
+                // the system accent fallback BitmapHelper already resolved).
+                // Setting only Background left hover/pressed on the AccentedButton
+                // style (system blue) and left the seekbar unthemed (#910, #516).
                 if (BitmapHelper.SavedDominantColors.Count > 0)
                 {
                     SolidColorBrush brush = BitmapHelper.SavedDominantColors.First();
-                    ControlPlayPause.Background = brush;
+                    ApplyAccentBrush(brush);
                 }
 
                 // acrylic effect setting
@@ -1655,15 +1735,21 @@ public partial class MainWindow : MicaWindow
 
             if (songInfo != null)
             {
-                SongTitle.Text = songInfo.Title;
-                SongArtist.Text = songInfo.Artist;
+                // Some players (ytmdesktop2, certain UWP bridges) publish an empty
+                // Title while still exposing a valid session. Fall back to the
+                // resolved process/app display name so the flyout isn't blank (#608).
+                string displayTitle = ResolveDisplayTitle(mediaSession, songInfo.Title);
+                string displayArtist = songInfo.Artist ?? string.Empty;
+
+                SongTitle.Text = displayTitle;
+                SongArtist.Text = displayArtist;
                 var image = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
                 SongImage.ImageSource = image;
 
                 // set tooltip
                 SongInfoStackPanel.ToolTip = string.Empty;
-                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(songInfo.Title) ? songInfo.Title : string.Empty;
-                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(songInfo.Artist) ? "\n\n" + songInfo.Artist : string.Empty;
+                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(displayTitle) ? displayTitle : string.Empty;
+                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(displayArtist) ? "\n\n" + displayArtist : string.Empty;
 
                 // background blurred image
                 if (SettingsManager.Current.MediaFlyoutBackgroundBlur != 0)
@@ -1934,16 +2020,39 @@ public partial class MainWindow : MicaWindow
 
     private async void Seekbar_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (sender is Slider slider)
-            slider.ReleaseMouseCapture();
-
-        if (GetActiveMediaSession() is { } session)
+        // Always end the drag first so a failed seek can't leave _isDragging
+        // stuck true (the update paths early-return while dragging).
+        try
         {
-            var seekPosition = TimeSpan.FromSeconds(Seekbar.Value);
-            if (seekPosition == TimeSpan.Zero) seekPosition = TimeSpan.FromSeconds(1);
-            await session.ControlSession.TryChangePlaybackPositionAsync(seekPosition.Ticks);
+            if (sender is Slider slider)
+                slider.ReleaseMouseCapture();
         }
-        _isDragging = false;
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Seekbar mouse-capture release failed");
+        }
+
+        try
+        {
+            // ControlSession can be null even when the MediaSession wrapper is
+            // alive, and TryChangePlaybackPositionAsync throws COMException when
+            // the session dies between the click and the await. async void: an
+            // uncaught throw here exits the process.
+            if (GetActiveMediaSession()?.ControlSession is { } controlSession)
+            {
+                var seekPosition = TimeSpan.FromSeconds(Seekbar.Value);
+                if (seekPosition == TimeSpan.Zero) seekPosition = TimeSpan.FromSeconds(1);
+                await controlSession.TryChangePlaybackPositionAsync(seekPosition.Ticks);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to seek media session to the selected position");
+        }
+        finally
+        {
+            _isDragging = false;
+        }
     }
 
     private void Seekbar_OnLostMouseCapture(object? sender, MouseEventArgs e)
@@ -2586,12 +2695,17 @@ public partial class MainWindow : MicaWindow
             {
                 try
                 {
+                    // Use the guarded playback-info helper: a raw GetPlaybackInfo
+                    // on a session that dies between the enumeration and the call
+                    // throws COMException (caught below, but still noisy and
+                    // races the TryPauseAsync path).
                     if (
                         session.Id != currentMediaSession.Id &&
-                        session.ControlSession?.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                        session.ControlSession is { } controlSession &&
+                        TryGetPlaybackInfo(controlSession)?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                     )
                     {
-                        return session.ControlSession.TryPauseAsync().AsTask();
+                        return controlSession.TryPauseAsync().AsTask();
                     }
                 }
                 catch (Exception ex)
@@ -2604,6 +2718,50 @@ public partial class MainWindow : MicaWindow
             })
         );
     }
+
+    /// <summary>
+    /// Paints the play/pause button and the seekbar with the album-art (or
+    /// system) accent brush. Hover is handled by MouseEnter/Leave against a
+    /// TransparentButton style (AccentedButton's template forced system-blue
+    /// on hover, ignoring Background — #910). Seekbar Foreground paints the
+    /// filled track (#516).
+    /// </summary>
+    private void ApplyAccentBrush(SolidColorBrush brush)
+    {
+        _playPauseAccentBrush = brush;
+
+        Color baseColor = brush.Color;
+        var hover = new SolidColorBrush(Color.FromArgb(
+            baseColor.A,
+            (byte)Math.Clamp(baseColor.R + 24, 0, 255),
+            (byte)Math.Clamp(baseColor.G + 24, 0, 255),
+            (byte)Math.Clamp(baseColor.B + 24, 0, 255)));
+        hover.Freeze();
+        _playPauseHoverBrush = hover;
+
+        ControlPlayPause.Background = brush;
+
+        ControlPlayPause.MouseEnter -= ControlPlayPause_MouseEnter;
+        ControlPlayPause.MouseLeave -= ControlPlayPause_MouseLeave;
+        ControlPlayPause.MouseEnter += ControlPlayPause_MouseEnter;
+        ControlPlayPause.MouseLeave += ControlPlayPause_MouseLeave;
+
+        // Default WPF Slider templates use Foreground for the filled track.
+        Seekbar.Foreground = brush;
+    }
+
+    private void ControlPlayPause_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (_playPauseHoverBrush != null)
+            ControlPlayPause.Background = _playPauseHoverBrush;
+    }
+
+    private void ControlPlayPause_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_playPauseAccentBrush != null)
+            ControlPlayPause.Background = _playPauseAccentBrush;
+    }
+
     internal void ToggleBlur()
     {
         if (SettingsManager.Current.MediaFlyoutAcrylicWindowEnabled)
