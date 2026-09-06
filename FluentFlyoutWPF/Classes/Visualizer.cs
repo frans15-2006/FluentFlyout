@@ -480,6 +480,18 @@ namespace FluentFlyoutWPF.Classes
                     continue;
 
                 _lastUpdateTime = now;
+
+                // WASAPI loopback hears every render stream, so without a media
+                // gate the bars light up for system sounds, blocked apps, and
+                // any non-music audio (#359, #923). Only show content when an
+                // allowed SMTC session is actually playing — the same filter
+                // the taskbar widget already uses.
+                if (!IsAllowedMediaPlaying())
+                {
+                    SettingsManager.Current.TaskbarVisualizerHasContent = false;
+                    continue;
+                }
+
                 SettingsManager.Current.TaskbarVisualizerHasContent = true;
 
                 if (SettingsManager.Current.TaskbarVisualizerBaseline && !SettingsManager.Current.TaskbarVisualizerBaselineAutoHide)
@@ -505,6 +517,39 @@ namespace FluentFlyoutWPF.Classes
                     UpdateBitmap();
                 else
                     SettingsManager.Current.TaskbarVisualizerHasContent = false;
+            }
+        }
+
+        /// <summary>
+        /// True when an app-filter-allowed SMTC session is currently Playing.
+        /// Used to suppress the visualizer for non-media audio and blocked apps
+        /// even though loopback capture still hears those streams.
+        /// </summary>
+        private static bool IsAllowedMediaPlaying()
+        {
+            try
+            {
+                if (Application.Current?.MainWindow is not FluentFlyoutWPF.MainWindow mainWindow)
+                    return false;
+
+                var session = mainWindow.GetActiveMediaSession();
+                if (session?.ControlSession == null)
+                    return false;
+
+                try
+                {
+                    var status = session.ControlSession.GetPlaybackInfo()?.PlaybackStatus;
+                    return status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                }
+                catch
+                {
+                    // Dead session between lookup and GetPlaybackInfo: treat as not playing.
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
