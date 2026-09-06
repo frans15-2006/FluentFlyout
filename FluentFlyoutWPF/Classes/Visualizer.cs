@@ -246,6 +246,11 @@ namespace FluentFlyoutWPF.Classes
 
         public static void ResizeBarList(int newBarCount)
         {
+            // A hand-edited or rolled-back settings file can deserialize 0 (or a
+            // negative count); ComputeLayout divides by it on the render path,
+            // which crashed on the first audio frame. Match the 1-20 range the
+            // settings UI exposes.
+            newBarCount = Math.Clamp(newBarCount, 1, 20);
             BarCount = newBarCount;
             _barValues = new float[BarCount];
         }
