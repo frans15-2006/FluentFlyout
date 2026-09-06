@@ -1927,17 +1927,17 @@ public partial class MainWindow : MicaWindow
 
     private void CleanupResources()
     {
-        // try saving settings before exiting if window is still open
-        // disabled because it caused too many issues (race conditions, shutdown exceptions), could look into another time
-        //try
-        //{
-        //    SettingsManager.SaveSettings();
-        //    Logger.Info("Settings saved successfully on cleanup");
-        //}
-        //catch (Exception ex)
-        //{
-        //    Logger.Error(ex, "Error while saving settings on cleanup");
-        //}
+        // Flush a debounced settings change made within the last 500 ms; a plain
+        // unconditional SaveSettings here caused shutdown races, so only save
+        // when a debounced save is actually pending (see UserSettings).
+        try
+        {
+            SettingsManager.Current.FlushPendingSettingsSave();
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Failed to flush pending settings save on shutdown");
+        }
 
         // should be handled automatically on app exit but just in case
         try

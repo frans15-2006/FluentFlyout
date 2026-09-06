@@ -844,6 +844,32 @@ public partial class UserSettings : ObservableObject
         _initializing = false;
     }
 
+    /// <summary>
+    /// Synchronously saves the settings if a debounced save is still pending.
+    /// Called on app shutdown so a change made within the 500 ms debounce
+    /// window is not lost; a no-op when no save is scheduled.
+    /// </summary>
+    public void FlushPendingSettingsSave()
+    {
+        var pendingCts = Interlocked.Exchange(ref _saveSettingsCts, null);
+        if (pendingCts == null) return; // no save pending
+
+        // Cancel the debounced save so it cannot also fire (a benign duplicate
+        // at worst, but pointless during shutdown).
+        pendingCts.Cancel();
+        pendingCts.Dispose();
+
+        try
+        {
+            SettingsManager.SaveSettings();
+            Logger.Debug("Flushed pending settings save on shutdown.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to flush pending settings save on shutdown.");
+        }
+    }
+
     partial void OnAppLanguageChanged(string oldValue, string newValue)
     {
         if (oldValue == newValue)
