@@ -1826,7 +1826,18 @@ public partial class MainWindow : MicaWindow
 
     private async void Forward_Click(object sender, RoutedEventArgs e)
     {
-        TrySkipNextAsync();
+        try
+        {
+            if (GetActiveMediaSession() is not { ControlSession: not null }) return;
+
+            await TrySkipNextAsync();
+        }
+        catch (Exception ex)
+        {
+            // async void: an uncaught throw here (session died between the
+            // click and the command) is unhandled and exits the process.
+            Logger.Error(ex, "Failed to send next-track command to the media session");
+        }
     }
 
     private async void Repeat_Click(object sender, RoutedEventArgs e)
