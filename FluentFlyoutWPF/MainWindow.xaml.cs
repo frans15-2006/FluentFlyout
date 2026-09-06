@@ -1794,7 +1794,18 @@ public partial class MainWindow : MicaWindow
 
     private async void Back_Click(object sender, RoutedEventArgs e)
     {
-        TrySkipPreviousAsync();
+        try
+        {
+            if (GetActiveMediaSession() is not { ControlSession: not null }) return;
+
+            await TrySkipPreviousAsync();
+        }
+        catch (Exception ex)
+        {
+            // async void: an uncaught throw here (session died between the
+            // click and the command) is unhandled and exits the process.
+            Logger.Error(ex, "Failed to send previous-track command to the media session");
+        }
     }
 
     private async void PlayPause_Click(object sender, RoutedEventArgs e)
