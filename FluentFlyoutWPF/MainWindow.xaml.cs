@@ -1842,26 +1842,37 @@ public partial class MainWindow : MicaWindow
 
     private async void Repeat_Click(object sender, RoutedEventArgs e)
     {
-        var activeSession = GetActiveMediaSession();
-        if (activeSession?.ControlSession is not { } controlSession) return;
+        try
+        {
+            var activeSession = GetActiveMediaSession();
+            if (activeSession?.ControlSession is not { } controlSession) return;
 
-        var playbackInfo = TryGetPlaybackInfo(controlSession);
-        if (playbackInfo == null) return;
+            var playbackInfo = TryGetPlaybackInfo(controlSession);
+            if (playbackInfo == null) return;
 
-        if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.None)
-        {
-            SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeatAll24);
-            await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.List);
+            if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.None)
+            {
+                SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeatAll24);
+                await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.List);
+            }
+            else if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.List)
+            {
+                SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeat124);
+                await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.Track);
+            }
+            else if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.Track)
+            {
+                SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeatAllOff24);
+                await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.None);
+            }
         }
-        else if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.List)
+        catch (Exception ex)
         {
-            SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeat124);
-            await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.Track);
-        }
-        else if (playbackInfo.AutoRepeatMode == global::Windows.Media.MediaPlaybackAutoRepeatMode.Track)
-        {
-            SymbolRepeat.Dispatcher.Invoke(() => SymbolRepeat.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowRepeatAllOff24);
-            await controlSession.TryChangeAutoRepeatModeAsync(global::Windows.Media.MediaPlaybackAutoRepeatMode.None);
+            // async void: an uncaught throw here (session died between the
+            // click and the command) is unhandled and exits the process. The
+            // optimistic symbol flip above re-syncs on the next playback-info
+            // update, so the UI is left as-is.
+            Logger.Error(ex, "Failed to change repeat mode");
         }
     }
 
