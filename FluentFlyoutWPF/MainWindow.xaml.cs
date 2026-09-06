@@ -668,6 +668,18 @@ public partial class MainWindow : MicaWindow
         var monitor = selectedMonitor != null ? selectedMonitor.Value : getSelectedMonitor();
         var workArea = monitor.workArea;
 
+        // GetSelectedMonitor returns default(MonitorInfo) while no monitor is
+        // enumerable (right after a display topology change): dpi 0 turns
+        // 96.0 / dpiY into infinity and SetWindowPos strands the window at
+        // -2 billion - the "flyout never appears" glitch. Bail out and retry
+        // placement via the display-refresh path instead.
+        if (monitor.dpiX == 0 || monitor.dpiY == 0 || workArea.Width <= 0 || workArea.Height <= 0)
+        {
+            Logger.Debug("No enumerable monitor for open placement; scheduling display environment refresh");
+            ScheduleDisplayEnvironmentRefresh("flyout placement with empty monitor info");
+            return;
+        }
+
         // prevent flickering
         WindowHelper.SetVisibility(window, false); // window.Visibility = Visibility.Hidden works with some delay
 
@@ -847,6 +859,16 @@ public partial class MainWindow : MicaWindow
         DoubleAnimation moveAnimation = (DoubleAnimation)storyboard.Children[0];
         var monitor = selectedMonitor != null ? selectedMonitor.Value : getSelectedMonitor();
         var workArea = monitor.workArea;
+
+        // Same empty-monitor bail-out as OpenAnimation: without it the close
+        // animation divides by dpi 0 and the window ends up off-screen instead
+        // of merely closed.
+        if (monitor.dpiX == 0 || monitor.dpiY == 0 || workArea.Width <= 0 || workArea.Height <= 0)
+        {
+            Logger.Debug("No enumerable monitor for close placement; scheduling display environment refresh");
+            ScheduleDisplayEnvironmentRefresh("flyout close placement with empty monitor info");
+            return;
+        }
 
         // Use the window's actual current rendered position as the animation
         // start. GetWindowPlacement can report zeros for transient handles and
