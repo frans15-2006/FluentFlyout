@@ -471,23 +471,56 @@ public partial class MainWindow : MicaWindow
 
     public async Task<bool> TrySkipPreviousAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TrySkipPreviousAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TrySkipPreviousAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send previous-track command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TryTogglePlayPauseAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TryTogglePlayPauseAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TryTogglePlayPauseAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send play/pause command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TrySkipNextAsync()
     {
-        var focusedSession = GetActiveMediaSession();
-        if (focusedSession == null) return false;
-        return await focusedSession.ControlSession.TrySkipNextAsync();
+        try
+        {
+            var focusedSession = GetActiveMediaSession();
+            if (focusedSession?.ControlSession is not { } controlSession) return false;
+            return await controlSession.TrySkipNextAsync();
+        }
+        catch (Exception ex)
+        {
+            // Shared by the media flyout and the taskbar widget (async void
+            // click handlers). A session that dies between the null-check and
+            // the WinRT call used to throw unhandled and kill the process (#807).
+            Logger.Error(ex, "Failed to send next-track command to the media session");
+            return false;
+        }
     }
 
     public async Task<bool> TryOpenMediaPlayerAsync()
