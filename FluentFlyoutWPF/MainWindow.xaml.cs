@@ -13,6 +13,7 @@ using FluentFlyoutWPF.ViewModels;
 using FluentFlyoutWPF.Windows;
 using MicaWPF.Controls;
 using MicaWPF.Core.Extensions;
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -1994,6 +1995,29 @@ public partial class MainWindow : MicaWindow
 
             // restore native volume OSD
             VolumeMixerWindow.ShowVolumeOsd();
+
+            // dispose the audio monitor now that the mixer/window teardown is
+            // done: unregisters the endpoint notification callback and releases
+            // the MMDeviceEnumerator COM reference it held for the app lifetime
+            try
+            {
+                AudioDeviceMonitor.Instance.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to dispose audio device monitor on shutdown");
+            }
+
+            // remove the toast activator registration so no stale notification
+            // activation can target (or relaunch) a shut-down instance
+            try
+            {
+                ToastNotificationManagerCompat.Unregister();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to unregister toast activator on shutdown");
+            }
 
             // dispose mutex
             singleton?.Dispose();
