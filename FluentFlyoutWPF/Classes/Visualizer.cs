@@ -246,8 +246,20 @@ namespace FluentFlyoutWPF.Classes
 
         public static void ResizeBarList(int newBarCount)
         {
+            // A hand-edited or rolled-back settings file can deserialize 0 (or a
+            // negative count); ComputeLayout divides by it on the render path,
+            // which crashed on the first audio frame. Match the 1-20 range the
+            // settings UI exposes.
+            newBarCount = Math.Clamp(newBarCount, 1, 20);
+
+            // Publish the replacement array BEFORE the new count, and size it to
+            // cover both counts: the capture/render threads index _barValues
+            // with the BarCount they observe, so updating BarCount first (or
+            // publishing a shorter array first) let a concurrent frame read past
+            // the end of the array. Sizing to max(old, new) keeps
+            // len(_barValues) >= BarCount at every observable instant.
+            _barValues = new float[Math.Max(newBarCount, BarCount)];
             BarCount = newBarCount;
-            _barValues = new float[BarCount];
         }
 
         public void Start()
@@ -420,7 +432,15 @@ namespace FluentFlyoutWPF.Classes
             // samples: 24-bit streams (common with spatial/Dolby Atmos pipelines)
             // decoded as permanent silence, and 6/8-channel streams fed the FFT
             // at multiples of the real rate. Downmix every frame to mono instead.
-            var waveFormat = _capture!.WaveFormat;
+            //
+            // Stop()/Start() can null or replace _capture while this callback is
+            // mid-flight on the capture thread; snapshot it so a stop/restart
+            // race can't NRE here or let two capture instances interleave.
+            var capture = _capture;
+            if (capture == null)
+                return;
+
+            var waveFormat = capture.WaveFormat;
             int bytesPerSample = waveFormat.BitsPerSample / 8;
             int channels = Math.Max(1, waveFormat.Channels);
             bool isFloat = waveFormat.Encoding == WaveFormatEncoding.IeeeFloat;
@@ -449,7 +469,7 @@ namespace FluentFlyoutWPF.Classes
 
                 // perform FFT
                 _fftPos = 0;
-                ProcessFftData();
+                ProcessFftData(capture.WaveFormat.SampleRate);
 
                 // Update UI with frame rate limiting
                 DateTime now = DateTime.UtcNow;
@@ -488,11 +508,10 @@ namespace FluentFlyoutWPF.Classes
             }
         }
 
-        private void ProcessFftData()
+        private void ProcessFftData(int sampleRate)
         {
             FastFourierTransform.FFT(true, (int)Math.Log(_fftLength, 2.0), _fftBuffer);
 
-            int sampleRate = _capture.WaveFormat.SampleRate;
             double frequencyPerBin = (double)sampleRate / _fftLength;
 
             double minFreq = 40;   // Hz
@@ -779,9 +798,23 @@ namespace FluentFlyoutWPF.Classes
 
         private static void WritePixel(Span<byte> buffer, int index, byte b, byte g, byte r, byte a)
         {
-            buffer[index] = b;
-            buffer[index + 1] = g;
-            buffer[index + 2] = r;
+            if (a < 255)
+            {
+                // BGRA32 is interpreted by WPF as premultiplied alpha: writing
+                // full-intensity channels under a partial alpha made the
+                // compositor over-brighten the antialiased bar edges into
+                // random-looking fringes around the visualizer.
+                buffer[index] = (byte)(b * a / 255);
+                buffer[index + 1] = (byte)(g * a / 255);
+                buffer[index + 2] = (byte)(r * a / 255);
+            }
+            else
+            {
+                buffer[index] = b;
+                buffer[index + 1] = g;
+                buffer[index + 2] = r;
+            }
+
             buffer[index + 3] = a;
         }
 

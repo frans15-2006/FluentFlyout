@@ -179,6 +179,19 @@ public static class MediaPlayerData
 
         try
         {
+            if (cachedInfo.ProcessId <= 0)
+            {
+                // ResolveViaAppsFolder caches ProcessId = -1 for packaged apps
+                // (no Win32 process match); Process.GetProcessById(-1) would
+                // throw and the catch below silently returned false. Launch
+                // them through their AUMID in shell:AppsFolder instead.
+                Process.Start(new ProcessStartInfo("shell:AppsFolder\\" + mediaPlayerId)
+                {
+                    UseShellExecute = true
+                });
+                return true;
+            }
+
             using var process = Process.GetProcessById(cachedInfo.ProcessId);
             IntPtr handle = process.MainWindowHandle;
             if (IsBrowser(process.ProcessName)) return TryActivateBrowserTab(process.ProcessName, mediaTitle);

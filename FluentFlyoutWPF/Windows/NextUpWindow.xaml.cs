@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024-2026 The FluentFlyout Authors
+// Copyright (c) 2024-2026 The FluentFlyout Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 using FluentFlyout.Classes;
@@ -16,7 +16,11 @@ namespace FluentFlyoutWPF.Windows;
 /// </summary>
 public partial class NextUpWindow : MicaWindow
 {
+    private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+
     MainWindow mainWindow = (MainWindow)Application.Current.MainWindow;
+    private bool _closed; // set when the window is closed before the auto-close fires
+
     public NextUpWindow(string title, string artist, BitmapImage thumbnail)
     {
         DataContext = SettingsManager.Current;
@@ -47,16 +51,33 @@ public partial class NextUpWindow : MicaWindow
         SongTitle.Text = title;
         SongArtist.Text = artist;
         UpdateThumbnail(thumbnail);
+        Closed += (_, _) => _closed = true;
         Show();
 
         mainWindow.OpenAnimation(this);
 
         async void wait()
         {
-            await Task.Delay(SettingsManager.Current.NextUpDuration);
-            mainWindow.CloseAnimation(this);
-            await Task.Delay(MainWindow.getDuration());
-            Close();
+            try
+            {
+                await Task.Delay(SettingsManager.Current.NextUpDuration);
+
+                // MainWindow closes this window early on a song change or media
+                // key; the orphaned continuation used to run CloseAnimation on
+                // the dead window (PointToScreen without a PresentationSource)
+                // inside async void and took the process down.
+                if (_closed) return;
+
+                mainWindow.CloseAnimation(this);
+                await Task.Delay(MainWindow.getDuration());
+                if (_closed) return;
+
+                Close();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Next Up auto-close continuation failed");
+            }
         }
 
         wait();

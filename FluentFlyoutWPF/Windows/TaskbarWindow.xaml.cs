@@ -193,7 +193,11 @@ public partial class TaskbarWindow : Window
         IntPtr checkWindowClass(IntPtr wnd)
         {
             var len = GetClassName(wnd, className, className.Capacity);
-            if (className.Equals("Shell_SecondaryTrayWnd"))
+            // StringBuilder.Equals(string) has no overload, so this bound to
+            // object.Equals (a reference comparison) and never matched: on 3+
+            // monitor setups no Shell_SecondaryTrayWnd was ever found and the
+            // widget always fell back to the main taskbar.
+            if (className.ToString().Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
             {
                 if (MonitorUtil.GetMonitor(wnd).deviceId == selectedMonitor.deviceId)
                 {
@@ -419,7 +423,7 @@ on_error:
         _pendingAutomationTasks.Clear();
     }
 
-    private void CalculateAndSetPosition(IntPtr taskbarHandle, IntPtr taskbarWindowHandle, bool isMainTaskbarSelected)
+    private async void CalculateAndSetPosition(IntPtr taskbarHandle, IntPtr taskbarWindowHandle, bool isMainTaskbarSelected)
     {
         // Prevent overlapping updates - if a previous update is still running
         // (e.g. waiting for an automation query timeout), skip this tick.
@@ -450,7 +454,8 @@ on_error:
             {
                 // first, try to find the Taskbar.TaskbarFrame element in the XAML
                 // this should give us the actual bounds of the taskbar, excluding invisible margins on some Windows configurations
-                (bool success, Rect result) = GetTaskbarFrameRect(taskbarHandle);
+                (bool success, Rect result) = await GetTaskbarFrameRect(taskbarHandle);
+                if (_isClosing) return;
                 if (success)
                 {
                     taskbarRect = new RECT
@@ -496,12 +501,19 @@ on_error:
                      containerPos.X, containerPos.Y,
                      containerWidth, containerHeight,
                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW);
-            var wRect = PositionWidget(taskbarHandle, taskbarRect, dpiScale, isMainTaskbarSelected, isVertical);
+            var wRect = await PositionWidget(taskbarHandle, taskbarRect, dpiScale, isMainTaskbarSelected, isVertical);
             var vRect = PositionVisualizer(taskbarHandle, taskbarRect, dpiScale, isMainTaskbarSelected, isVertical);
+            if (_isClosing) return;
 
             UpdateWindowRegion(taskbarWindowHandle, wRect, vRect);
 
             _lastSelectedMonitor = SettingsManager.Current.TaskbarWidgetSelectedMonitor;
+        }
+        catch (Exception ex)
+        {
+            // async void: an exception escaping this method would take the
+            // process down; the next timer tick retries placement.
+            Logger.Error(ex, "Failed to calculate and set taskbar widget position");
         }
         finally
         {
@@ -509,7 +521,7 @@ on_error:
         }
     }
 
-    private Rect PositionWidget(IntPtr taskbarHandle, RECT taskbarRect, double dpiScale, bool isMainTaskbarSelected, bool isVertical)
+    private async Task<Rect> PositionWidget(IntPtr taskbarHandle, RECT taskbarRect, double dpiScale, bool isMainTaskbarSelected, bool isVertical)
     {
         if (!SettingsManager.Current.TaskbarWidgetEnabled)
             return Rect.Empty;
@@ -558,7 +570,7 @@ on_error:
                 try
                 {
                     // find widget button in XAML
-                    (bool found, Rect nativeWidgetRect) = GetTaskbarWidgetRect(taskbarHandle);
+                    (bool found, Rect nativeWidgetRect) = await GetTaskbarWidgetRect(taskbarHandle);
 
                     // Accept only if the native Widgets button is in the start half of the taskbar
                     bool inStartHalf = isVertical
@@ -603,7 +615,7 @@ on_error:
                         try
                         {
                             // find widget button in XAML
-                            (bool found, Rect nativeWidgetRect) = GetTaskbarWidgetRect(taskbarHandle);
+                            (bool found, Rect nativeWidgetRect) = await GetTaskbarWidgetRect(taskbarHandle);
 
                             // make sure it's on the right side, otherwise ignore (widget might be to the left)
                             if (found && nativeWidgetRect.Left > (taskbarRect.Left + taskbarRect.Right) / 2.0)
@@ -623,7 +635,7 @@ on_error:
                     if (!isMainTaskbarSelected)
                     {
                         // find secondary tray with automation
-                        (bool found, Rect trayRect) = GetSystemTrayRect(taskbarHandle);
+                        (bool found, Rect trayRect) = await GetSystemTrayRect(taskbarHandle);
 
                         if (found)
                         {
@@ -640,7 +652,7 @@ on_error:
                         // Primary taskbar: for vertical, try automation first (more reliable on ExplorerPatcher)
                         if (isVertical)
                         {
-                            (bool trayFound, Rect trayAutomationRect) = GetSystemTrayRect(taskbarHandle);
+                            (bool trayFound, Rect trayAutomationRect) = await GetSystemTrayRect(taskbarHandle);
                             if (trayFound && trayAutomationRect.Top >= taskbarRect.Top)
                             {
                                 primaryPos += (int)(trayAutomationRect.Top - taskbarRect.Top) - physicalWidth - 2;
@@ -836,7 +848,7 @@ on_error:
         Widget.RefreshAppVolumeTooltip();
     }
 
-    private (bool, Rect) GetTaskbarXamlElementRect(IntPtr taskbarHandle, ref AutomationElement? elementCache, string elementName)
+    private async Task<(bool, Rect)> GetTaskbarXamlElementRectAsync(IntPtr taskbarHandle, Func<AutomationElement?> getElement, Action<AutomationElement?> setElement, string elementName)
     {
         if (taskbarHandle == IntPtr.Zero)
             return (false, Rect.Empty);
@@ -845,7 +857,9 @@ on_error:
         {
             // reset if monitor changed
             if (_lastSelectedMonitor != SettingsManager.Current.TaskbarWidgetSelectedMonitor)
-                elementCache = null;
+                setElement(null);
+
+            var elementCache = getElement();
 
             // find widget in XAML
             if (elementCache == null)
@@ -862,15 +876,20 @@ on_error:
                 });
                 _pendingAutomationTasks[elementName] = findTask;
 
-                if (!findTask.Wait(1000))
+                // Wait asynchronously with the same dedupe and timeout as
+                // before: Wait(1000) ran on the dispatcher and froze the
+                // widget plus every queued media UI action whenever
+                // Explorer's automation tree answered slowly.
+                if (await Task.WhenAny(findTask, Task.Delay(1000)) != findTask)
                 {
                     Logger.Warn("Timeout querying taskbar XAML element: " + elementName);
                     return (false, Rect.Empty);
                 }
 
                 // Propagate any exception from the background thread
-                findTask.GetAwaiter().GetResult();
+                await findTask;
                 elementCache = found;
+                setElement(found);
             }
 
             if (elementCache == null) // widget most likely disabled
@@ -880,7 +899,7 @@ on_error:
             {
                 if (_pendingAutomationTasks.TryGetValue(elementName, out var pendingTask) && !pendingTask.IsCompleted)
                 {
-                    elementCache = null;
+                    setElement(null);
                     return (false, Rect.Empty);
                 }
 
@@ -888,18 +907,18 @@ on_error:
                 var boundsTask = Task.Run(() => cachedElement.Current.BoundingRectangle);
                 _pendingAutomationTasks[elementName] = boundsTask;
 
-                if (!boundsTask.Wait(500))
+                if (await Task.WhenAny(boundsTask, Task.Delay(500)) != boundsTask)
                 {
                     Logger.Warn("Timeout getting bounds for taskbar XAML element: " + elementName);
-                    elementCache = null;
+                    setElement(null);
                     return (false, Rect.Empty);
                 }
 
-                Rect elementRect = boundsTask.GetAwaiter().GetResult();
+                Rect elementRect = await boundsTask;
 
                 if (elementRect == Rect.Empty) // widget shown before but most likely disabled now
                 {
-                    elementCache = null; // reset cache
+                    setElement(null); // reset cache
                     return (false, Rect.Empty);
                 }
 
@@ -909,26 +928,26 @@ on_error:
             {
                 // element became stale, reset cache
                 Logger.Warn("Taskbar XAML element became stale, resetting cache: " + elementName);
-                elementCache = null;
+                setElement(null);
                 return (false, Rect.Empty);
             }
         }
         catch (COMException ex)
         {
             Logger.Warn(ex, "COM error retrieving taskbar XAML element Rect: " + elementName);
-            elementCache = null; // reset cache on error
+            setElement(null); // reset cache on error
             return (false, Rect.Empty);
         }
         catch (ElementNotAvailableException)
         {
             Logger.Warn("Taskbar XAML element not available, resetting cache: " + elementName);
-            elementCache = null;
+            setElement(null);
             return (false, Rect.Empty);
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "Error retrieving taskbar XAML element Rect: " + elementName);
-            elementCache = null; // reset cache on error
+            setElement(null); // reset cache on error
             return (false, Rect.Empty);
         }
     }
@@ -939,19 +958,19 @@ on_error:
     /// <returns>A tuple where the first value indicates whether the widgets button was found (<see langword="true"/> if found;
     /// otherwise, <see langword="false"/>), and the second value is the bounding rectangle of the button if found, or
     /// <see cref="Rect.Empty"/> if not found.</returns>
-    private (bool, Rect) GetTaskbarWidgetRect(IntPtr taskbarHandle)
+    private Task<(bool, Rect)> GetTaskbarWidgetRect(IntPtr taskbarHandle)
     {
-        return GetTaskbarXamlElementRect(taskbarHandle, ref _widgetElement, "WidgetsButton");
+        return GetTaskbarXamlElementRectAsync(taskbarHandle, () => _widgetElement, v => _widgetElement = v, "WidgetsButton");
     }
 
-    private (bool, Rect) GetSystemTrayRect(IntPtr taskbarHandle)
+    private Task<(bool, Rect)> GetSystemTrayRect(IntPtr taskbarHandle)
     {
-        return GetTaskbarXamlElementRect(taskbarHandle, ref _trayElement, "SystemTrayIcon");
+        return GetTaskbarXamlElementRectAsync(taskbarHandle, () => _trayElement, v => _trayElement = v, "SystemTrayIcon");
     }
 
-    private (bool, Rect) GetTaskbarFrameRect(IntPtr taskbarHandle)
+    private Task<(bool, Rect)> GetTaskbarFrameRect(IntPtr taskbarHandle)
     {
-        return GetTaskbarXamlElementRect(taskbarHandle, ref _taskbarFrameElement, "TaskbarFrame");
+        return GetTaskbarXamlElementRectAsync(taskbarHandle, () => _taskbarFrameElement, v => _taskbarFrameElement = v, "TaskbarFrame");
     }
 
     protected override void OnClosed(EventArgs e)

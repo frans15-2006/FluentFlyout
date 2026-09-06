@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024-2026 The FluentFlyout Authors
+// Copyright (c) 2024-2026 The FluentFlyout Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 using FluentFlyout.Classes.Settings;
@@ -12,7 +12,7 @@ public sealed class FluentFlyoutApiClient
     private static readonly object _lock = new();
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(2);
     private static readonly Uri _uri = new("https://fluentflyout.com/api/");
-    private const int MaxConsecutiveTimeouts = 1;
+    private const int MaxConsecutiveTimeouts = 3;
 
     private static int _consecutiveTimeouts;
     private static HttpClient _client;
@@ -24,10 +24,12 @@ public sealed class FluentFlyoutApiClient
 
     public static async Task<string> GetStringAsync(string endpoint)
     {
-        UpdateUserAgent();
+        using var request = CreateRequest(HttpMethod.Get, endpoint);
         try
         {
-            var result = await _client.GetStringAsync(endpoint);
+            using var response = await _client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadAsStringAsync();
             OnRequestSucceeded();
             return result;
         }
@@ -40,10 +42,11 @@ public sealed class FluentFlyoutApiClient
 
     public static async Task PostAsJsonAsync<T>(string endpoint, T content)
     {
-        UpdateUserAgent();
+        using var request = CreateRequest(HttpMethod.Post, endpoint);
+        request.Content = JsonContent.Create(content);
         try
         {
-            await _client.PostAsJsonAsync(endpoint, content);
+            await _client.SendAsync(request);
             OnRequestSucceeded();
 
         }
@@ -84,13 +87,18 @@ public sealed class FluentFlyoutApiClient
         };
     }
 
-    private static void UpdateUserAgent()
+    private static HttpRequestMessage CreateRequest(HttpMethod method, string endpoint)
     {
+        var request = new HttpRequestMessage(method, endpoint);
+
+        // Per-request User-Agent: mutating the shared DefaultRequestHeaders
+        // raced with in-flight requests that enumerate the same header
+        // collection and could throw or send a torn header value.
         string appVersion = SettingsManager.Current.LastKnownVersion;
         string normalizedVersion = string.IsNullOrWhiteSpace(appVersion) ? "unknown" : appVersion;
+        request.Headers.TryAddWithoutValidation("User-Agent", $"FluentFlyout/{normalizedVersion}");
 
-        _client.DefaultRequestHeaders.UserAgent.Clear();
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd($"FluentFlyout/{normalizedVersion}");
+        return request;
     }
 
     private static void RenewClient()
@@ -100,7 +108,10 @@ public sealed class FluentFlyoutApiClient
             if (Interlocked.CompareExchange(ref _consecutiveTimeouts, 0, MaxConsecutiveTimeouts) < MaxConsecutiveTimeouts)
                 return;
 
-            _client.Dispose();
+            // Swap the reference only: disposing the old HttpClient would
+            // ObjectDisposedException every in-flight request still holding
+            // it. The replaced instance becomes unreachable and its sockets
+            // are reclaimed by finalizer/handler cleanup.
             _client = CreateClient();
             Interlocked.Exchange(ref _consecutiveTimeouts, 0);
         }

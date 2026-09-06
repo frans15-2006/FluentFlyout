@@ -62,19 +62,32 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
 
     private void AttachDevice(MMDevice? device)
     {
-        if (_device != null)
+        var oldDevice = _device;
+        _device = device;
+
+        if (oldDevice != null)
         {
             try
             {
-                _device.AudioEndpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification;
+                oldDevice.AudioEndpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification;
             }
             catch (Exception ex)
             {
                 Logger.Debug(ex, "Failed to unsubscribe from previous volume notifications");
             }
-        }
 
-        _device = device;
+            // MMDevice wraps a COM endpoint; every re-attach path (default device
+            // change, resume recovery, stale-endpoint drop) used to drop the old
+            // instance without Dispose and leaked the IMMDevice + endpoint.
+            try
+            {
+                oldDevice.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to dispose previous audio endpoint");
+            }
+        }
 
         if (_device == null)
         {
@@ -271,15 +284,11 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
         if (_device == null) return;
         try
         {
+            // Mute is an independent toggle: the native Windows mixer never
+            // flips mute from the volume slider, and forcing IsMuted to follow
+            // Volume==0 made the OSD show the muted icon and left the device
+            // silent when unmuting at volume 0.
             _device.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Clamp(value, 0f, 1f);
-            if (MasterVolume == 0f)
-            {
-                IsMasterMuted = true;
-            }
-            else
-            {
-                IsMasterMuted = false;
-            }
         }
         catch (Exception ex)
         {
@@ -390,6 +399,8 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
                 // forever, so the displayed volume freezes (#1086/#1076).
                 // Drop it and re-resolve the current default endpoint.
                 Logger.Debug(ex, "Failed to read master volume from device, reattaching default endpoint");
+                try { _device.Dispose(); }
+                catch (Exception disposeEx) { Logger.Debug(disposeEx, "Failed to dispose stale audio endpoint"); }
                 _device = null;
                 EnsureDeviceAttached();
                 return;
@@ -412,10 +423,11 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
         if (_device == null)
             return;
 
+        MMDevice? updatedDevice = null;
         try
         {
             // update device reference because previous _device doesn't have updated sessions
-            var updatedDevice = AudioDeviceMonitor.Instance.GetDeviceById(_device.ID) ?? _device;
+            updatedDevice = AudioDeviceMonitor.Instance.GetDeviceById(_device.ID) ?? _device;
             var sessionManager = updatedDevice.AudioSessionManager;
             var sessions = sessionManager.Sessions;
 
@@ -451,6 +463,17 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Logger.Error(ex, "Failed to enumerate audio sessions");
+        }
+        finally
+        {
+            // GetDeviceById hands out a fresh MMDevice per call; dropping it
+            // without Dispose leaked a COM endpoint on every mixer refresh.
+            // _device stays the long-lived notification target.
+            if (updatedDevice != null && !ReferenceEquals(updatedDevice, _device))
+            {
+                try { updatedDevice.Dispose(); }
+                catch (Exception ex) { Logger.Debug(ex, "Failed to dispose refreshed audio endpoint"); }
+            }
         }
     }
 
@@ -571,6 +594,17 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
             {
                 Logger.Debug(ex, "Failed to unsubscribe from volume notifications on dispose");
             }
+
+            try
+            {
+                _device.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug(ex, "Failed to dispose audio endpoint on dispose");
+            }
+
+            _device = null;
         }
 
         ClearSessions();

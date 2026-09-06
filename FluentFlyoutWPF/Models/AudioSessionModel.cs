@@ -11,6 +11,8 @@ namespace FluentFlyoutWPF.Models;
 
 public partial class AudioSessionModel : ObservableObject
 {
+    private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+
     private readonly AudioSessionControl _sessionControl;
     private bool _syncing;
 
@@ -51,23 +53,39 @@ public partial class AudioSessionModel : ObservableObject
     partial void OnVolumeChanged(float value)
     {
         if (_syncing) return;
-        _sessionControl.SimpleAudioVolume.Volume = Math.Clamp(value, 0f, 1f);
-        if (Volume == 0f)
+
+        try
         {
-            IsMuted = true;
+            _sessionControl.SimpleAudioVolume.Volume = Math.Clamp(value, 0f, 1f);
         }
-        else
+        catch (Exception ex)
         {
-            IsMuted = false;
+            // The owning process (and with it the audio session) can exit between
+            // enumeration and this write; the COMException escaping the
+            // ObservableProperty setter inside WPF binding killed the process.
+            Logger.Debug(ex, "Failed to set volume for session (process {0})", ProcessId);
+            return; // keep the stale in-memory value
         }
 
+        // Mute is an independent toggle: forcing IsMuted to follow Volume==0
+        // made a dragged-to-zero slider flip the session's mute flag and flip
+        // it back on the way up, desyncing the mixer row from the real
+        // session state (SetVolume syncs IsMuted from the session instead).
         VolumeChanged?.Invoke(this, EventArgs.Empty);
     }
 
     partial void OnIsMutedChanged(bool value)
     {
         if (_syncing) return;
-        _sessionControl.SimpleAudioVolume.Mute = value;
+
+        try
+        {
+            _sessionControl.SimpleAudioVolume.Mute = value;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Failed to set mute for session (process {0})", ProcessId);
+        }
     }
 
     public void AdjustVolume(float delta)

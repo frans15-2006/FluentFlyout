@@ -20,6 +20,7 @@ public partial class SettingsWindow : FluentWindow
     private ScrollViewer? _contentScrollViewer;
     private List<SearchItem> _allSearchItems = [];
     private string? _pendingHighlightElementId = null;
+    private System.ComponentModel.PropertyChangedEventHandler? _settingsPropertyChangedHandler;
 
     public SettingsWindow()
     {
@@ -195,7 +196,12 @@ public partial class SettingsWindow : FluentWindow
             }
         };
 
-        SettingsManager.Current.PropertyChanged += async (s, args) =>
+        // Store the handler so OnClosed can unsubscribe: SettingsManager.Current
+        // is an app-lifetime static, and the anonymous subscription pinned every
+        // closed SettingsWindow (NavigationView, pages, images) forever - and
+        // dead closures still re-navigated on each theme change.
+        SettingsManager.Current.PropertyChanged -= _settingsPropertyChangedHandler; // no-op unless Loaded fires twice
+        _settingsPropertyChangedHandler = async (s, args) =>
         {
             if (args.PropertyName == nameof(SettingsManager.Current.AppTheme))
             {
@@ -223,8 +229,20 @@ public partial class SettingsWindow : FluentWindow
                 }, System.Windows.Threading.DispatcherPriority.Loaded);
             }
         };
+        SettingsManager.Current.PropertyChanged += _settingsPropertyChangedHandler;
 
         BuildSearchItems();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        if (_settingsPropertyChangedHandler != null)
+        {
+            SettingsManager.Current.PropertyChanged -= _settingsPropertyChangedHandler;
+            _settingsPropertyChangedHandler = null;
+        }
+
+        base.OnClosed(e);
     }
 
     private void SettingsWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
