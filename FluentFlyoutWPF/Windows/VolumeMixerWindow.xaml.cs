@@ -13,6 +13,7 @@ using FluentFlyoutWPF.Classes;
 using FluentFlyoutWPF.ViewModels;
 using MicaWPF.Controls;
 using NLog;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media.Animation;
 using static FluentFlyout.Classes.NativeMethods;
@@ -251,14 +252,28 @@ public partial class VolumeMixerWindow : MicaWindow
     }
 
     // derived from gpkgpk/HideVolumeOSD: https://github.com/gpkgpk/HideVolumeOSD
+    [DllImport("user32.dll")]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
+
+    private const uint SPI_GETWORKAREA = 0x0048;
+
     private static void HideVolumeOsd()
     {
+        // Already hiding an island: re-enumerating would either re-hide the
+        // same one or, once our island was moved off-screen, run headlong
+        // into the next candidate.
+        if (_nativeOsdElement != IntPtr.Zero)
+            return;
+
         // Enumerate top-level XAML islands properly: FindWindowEx with a NULL
         // child-after handle always returns the FIRST match, so the previous
         // code re-examined the same window forever (100% CPU spin) whenever it
         // didn't meet the criteria, and could hide the wrong island's window.
         IntPtr hwndOsd = IntPtr.Zero;
         IntPtr hwndXamlIsland = IntPtr.Zero;
+
+        RECT workArea = default;
+        bool workAreaValid = SystemParametersInfo(SPI_GETWORKAREA, 0, ref workArea, 0);
 
         while ((hwndXamlIsland = FindWindowEx(IntPtr.Zero, hwndXamlIsland, "XamlExplorerHostIslandWindow", null)) != IntPtr.Zero)
         {
@@ -277,6 +292,15 @@ public partial class VolumeMixerWindow : MicaWindow
                 {
                     if (rect.Top == 0 && rect.Left == 0 && rect.Bottom == 0 && rect.Right == 0)
                     {
+                        continue;
+                    }
+
+                    // IME flyouts and other shell surfaces share these class
+                    // names; only the actual volume OSD (bottom-center of the
+                    // primary work area) may be hidden.
+                    if (!IsVolumeOsdRect(rect, workArea, workAreaValid))
+                    {
+                        Logger.Debug("Skipping island window that is not at the volume OSD position.");
                         continue;
                     }
 
@@ -304,6 +328,33 @@ public partial class VolumeMixerWindow : MicaWindow
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(_nativeOsdElement, SW_MINIMIZE);
         Logger.Info("Successfully hid volume OSD.");
+    }
+
+    /// <summary>
+    /// The native volume OSD is a XamlExplorerHostIslandWindow docked to the
+    /// bottom-center of the primary work area. IME flyouts and other shell
+    /// surfaces reuse the same class names, so a candidate anywhere else must
+    /// not be hidden.
+    /// </summary>
+    private static bool IsVolumeOsdRect(RECT rect, RECT workArea, bool workAreaValid)
+    {
+        if (!workAreaValid)
+            return true; // fail open: keep the previous behavior when the work area can't be queried
+
+        double workWidth = workArea.Right - workArea.Left;
+        double workHeight = workArea.Bottom - workArea.Top;
+        if (workWidth <= 0 || workHeight <= 0)
+            return true;
+
+        double centerX = (rect.Left + rect.Right) / 2.0;
+        double workCenterX = (workArea.Left + workArea.Right) / 2.0;
+
+        // horizontally centered on the primary work area
+        if (Math.Abs(centerX - workCenterX) > workWidth * 0.2)
+            return false;
+
+        // and in its bottom band (the OSD pops up just above the taskbar)
+        return rect.Bottom > workArea.Top + workHeight * 0.5 && rect.Top >= workArea.Top;
     }
 
     /// <summary>
