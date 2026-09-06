@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024-2026 The FluentFlyout Authors
+// Copyright (c) 2024-2026 The FluentFlyout Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 using System.IO;
@@ -34,14 +34,27 @@ namespace FluentFlyoutWPF.Classes.Utils
             }
             catch { }
 
-            // if neither of those exist, return hardcoded path
-            // %localAppData%\Packages\unchihugo.FluentFlyout_69b7b6qge1ahj\LocalCache\Roaming\FluentFlyout
+            // if neither of those exist, check the hardcoded MSIX path before
+            // returning it: handing back a nonexistent folder made the log
+            // viewer run `explorer.exe <missing path>`, which just opens
+            // Documents (#756). Fall back to %APPDATA%\FluentFlyout instead.
+            try
+            {
+                path = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Packages",
+                    "unchihugo.FluentFlyout_69b7b6qge1ahj",
+                    "LocalCache",
+                    "Roaming",
+                    "FluentFlyout"
+                );
+                if (Directory.Exists(path))
+                    return path;
+            }
+            catch { }
+
             return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Packages",
-                "unchihugo.FluentFlyout_69b7b6qge1ahj",
-                "LocalCache",
-                "Roaming",
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "FluentFlyout"
             );
         }
