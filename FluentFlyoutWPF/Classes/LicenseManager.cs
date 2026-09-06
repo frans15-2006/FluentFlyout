@@ -361,7 +361,7 @@ public class LicenseManager
                 MessageBox messageBox = new()
                 {
                     Title = "Success",
-                    Content = Application.Current.TryFindResource("PremiumPurchaseSuccess").ToString(),
+                    Content = Application.Current.TryFindResource("PremiumPurchaseSuccess")?.ToString() ?? "Purchase successful.",
                     CloseButtonText = "OK",
                 };
 
@@ -372,7 +372,7 @@ public class LicenseManager
                 MessageBox messageBox = new()
                 {
                     Title = "Purchase Failed",
-                    Content = $"{Application.Current.TryFindResource("PremiumPurchaseFailed")} ({result})",
+                    Content = $"{Application.Current.TryFindResource("PremiumPurchaseFailed") ?? "Purchase failed"} ({result})",
                     CloseButtonText = "OK",
                 };
 
@@ -395,7 +395,7 @@ public class LicenseManager
             if (sender is Wpf.Ui.Controls.Button button)
             {
                 button.IsEnabled = true;
-                button.Content = Application.Current.TryFindResource("UnlockPremiumButton").ToString();
+                button.Content = Application.Current.TryFindResource("UnlockPremiumButton")?.ToString() ?? "Unlock Premium";
             }
         }
     }
