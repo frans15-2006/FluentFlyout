@@ -758,30 +758,61 @@ public partial class TaskbarWidgetControl : UserControl
     }
 
     // event handlers for media control buttons
+    // async void: any throw here is unhandled on the dispatcher and kills the
+    // process. The Try* helpers already swallow dead-session COMExceptions, but
+    // a null MainWindow race (window recreated mid-click) or a dispatcher fault
+    // still needs a local catch so widget buttons never crash the app (#807).
     private async void Previous_Click(object sender, RoutedEventArgs e)
     {
-        if (_mainWindow == null) return;
-        await _mainWindow.TrySkipPreviousAsync();
+        try
+        {
+            if (_mainWindow == null) return;
+            await _mainWindow.TrySkipPreviousAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Taskbar widget previous-track click failed");
+        }
     }
 
     private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
-        if (_mainWindow == null) return;
-        await _mainWindow.TryTogglePlayPauseAsync();
+        try
+        {
+            if (_mainWindow == null) return;
+            await _mainWindow.TryTogglePlayPauseAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Taskbar widget play/pause click failed");
+        }
     }
 
     private async void Next_Click(object sender, RoutedEventArgs e)
     {
-        if (_mainWindow == null) return;
-        await _mainWindow.TrySkipNextAsync();
+        try
+        {
+            if (_mainWindow == null) return;
+            await _mainWindow.TrySkipNextAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Taskbar widget next-track click failed");
+        }
     }
 
     // Event handlers for context menu items
     private async void ContextMenuMediaPlayer_Click(object sender, RoutedEventArgs e)
     {
-        if (_mainWindow == null) return;
-
-        _ = _mainWindow.TryOpenMediaPlayerAsync();
+        try
+        {
+            if (_mainWindow == null) return;
+            _ = _mainWindow.TryOpenMediaPlayerAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Taskbar widget open-player click failed");
+        }
     }
 
     private void ContextMenuSettings_Click(object sender, RoutedEventArgs e)
