@@ -1878,21 +1878,32 @@ public partial class MainWindow : MicaWindow
 
     private async void Shuffle_Click(object sender, RoutedEventArgs e)
     {
-        var activeSession = GetActiveMediaSession();
-        if (activeSession?.ControlSession is not { } controlSession) return;
-
-        var playbackInfo = TryGetPlaybackInfo(controlSession);
-        if (playbackInfo == null) return;
-
-        if (playbackInfo.IsShuffleActive == true)
+        try
         {
-            SymbolShuffle.Dispatcher.Invoke(() => SymbolShuffle.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowShuffleOff24);
-            await controlSession.TryChangeShuffleActiveAsync(false);
+            var activeSession = GetActiveMediaSession();
+            if (activeSession?.ControlSession is not { } controlSession) return;
+
+            var playbackInfo = TryGetPlaybackInfo(controlSession);
+            if (playbackInfo == null) return;
+
+            if (playbackInfo.IsShuffleActive == true)
+            {
+                SymbolShuffle.Dispatcher.Invoke(() => SymbolShuffle.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowShuffleOff24);
+                await controlSession.TryChangeShuffleActiveAsync(false);
+            }
+            else
+            {
+                SymbolShuffle.Dispatcher.Invoke(() => SymbolShuffle.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowShuffle24);
+                await controlSession.TryChangeShuffleActiveAsync(true);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            SymbolShuffle.Dispatcher.Invoke(() => SymbolShuffle.Symbol = Wpf.Ui.Controls.SymbolRegular.ArrowShuffle24);
-            await controlSession.TryChangeShuffleActiveAsync(true);
+            // async void: an uncaught throw here (session died between the
+            // click and the command) is unhandled and exits the process. The
+            // optimistic symbol flip above re-syncs on the next playback-info
+            // update, so the UI is left as-is.
+            Logger.Error(ex, "Failed to change shuffle mode");
         }
     }
 
