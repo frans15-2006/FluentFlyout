@@ -2690,12 +2690,17 @@ public partial class MainWindow : MicaWindow
             {
                 try
                 {
+                    // Use the guarded playback-info helper: a raw GetPlaybackInfo
+                    // on a session that dies between the enumeration and the call
+                    // throws COMException (caught below, but still noisy and
+                    // races the TryPauseAsync path).
                     if (
                         session.Id != currentMediaSession.Id &&
-                        session.ControlSession?.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                        session.ControlSession is { } controlSession &&
+                        TryGetPlaybackInfo(controlSession)?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                     )
                     {
-                        return session.ControlSession.TryPauseAsync().AsTask();
+                        return controlSession.TryPauseAsync().AsTask();
                     }
                 }
                 catch (Exception ex)
