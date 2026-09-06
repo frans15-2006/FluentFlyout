@@ -779,9 +779,23 @@ namespace FluentFlyoutWPF.Classes
 
         private static void WritePixel(Span<byte> buffer, int index, byte b, byte g, byte r, byte a)
         {
-            buffer[index] = b;
-            buffer[index + 1] = g;
-            buffer[index + 2] = r;
+            if (a < 255)
+            {
+                // BGRA32 is interpreted by WPF as premultiplied alpha: writing
+                // full-intensity channels under a partial alpha made the
+                // compositor over-brighten the antialiased bar edges into
+                // random-looking fringes around the visualizer.
+                buffer[index] = (byte)(b * a / 255);
+                buffer[index + 1] = (byte)(g * a / 255);
+                buffer[index + 2] = (byte)(r * a / 255);
+            }
+            else
+            {
+                buffer[index] = b;
+                buffer[index + 1] = g;
+                buffer[index + 2] = r;
+            }
+
             buffer[index + 3] = a;
         }
 
