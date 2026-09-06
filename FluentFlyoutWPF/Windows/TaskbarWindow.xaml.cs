@@ -193,7 +193,11 @@ public partial class TaskbarWindow : Window
         IntPtr checkWindowClass(IntPtr wnd)
         {
             var len = GetClassName(wnd, className, className.Capacity);
-            if (className.Equals("Shell_SecondaryTrayWnd"))
+            // StringBuilder.Equals(string) has no overload, so this bound to
+            // object.Equals (a reference comparison) and never matched: on 3+
+            // monitor setups no Shell_SecondaryTrayWnd was ever found and the
+            // widget always fell back to the main taskbar.
+            if (className.ToString().Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
             {
                 if (MonitorUtil.GetMonitor(wnd).deviceId == selectedMonitor.deviceId)
                 {
