@@ -251,8 +251,15 @@ namespace FluentFlyoutWPF.Classes
             // which crashed on the first audio frame. Match the 1-20 range the
             // settings UI exposes.
             newBarCount = Math.Clamp(newBarCount, 1, 20);
+
+            // Publish the replacement array BEFORE the new count, and size it to
+            // cover both counts: the capture/render threads index _barValues
+            // with the BarCount they observe, so updating BarCount first (or
+            // publishing a shorter array first) let a concurrent frame read past
+            // the end of the array. Sizing to max(old, new) keeps
+            // len(_barValues) >= BarCount at every observable instant.
+            _barValues = new float[Math.Max(newBarCount, BarCount)];
             BarCount = newBarCount;
-            _barValues = new float[BarCount];
         }
 
         public void Start()
