@@ -1967,16 +1967,39 @@ public partial class MainWindow : MicaWindow
 
     private async void Seekbar_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (sender is Slider slider)
-            slider.ReleaseMouseCapture();
-
-        if (GetActiveMediaSession() is { } session)
+        // Always end the drag first so a failed seek can't leave _isDragging
+        // stuck true (the update paths early-return while dragging).
+        try
         {
-            var seekPosition = TimeSpan.FromSeconds(Seekbar.Value);
-            if (seekPosition == TimeSpan.Zero) seekPosition = TimeSpan.FromSeconds(1);
-            await session.ControlSession.TryChangePlaybackPositionAsync(seekPosition.Ticks);
+            if (sender is Slider slider)
+                slider.ReleaseMouseCapture();
         }
-        _isDragging = false;
+        catch (Exception ex)
+        {
+            Logger.Debug(ex, "Seekbar mouse-capture release failed");
+        }
+
+        try
+        {
+            // ControlSession can be null even when the MediaSession wrapper is
+            // alive, and TryChangePlaybackPositionAsync throws COMException when
+            // the session dies between the click and the await. async void: an
+            // uncaught throw here exits the process.
+            if (GetActiveMediaSession()?.ControlSession is { } controlSession)
+            {
+                var seekPosition = TimeSpan.FromSeconds(Seekbar.Value);
+                if (seekPosition == TimeSpan.Zero) seekPosition = TimeSpan.FromSeconds(1);
+                await controlSession.TryChangePlaybackPositionAsync(seekPosition.Ticks);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "Failed to seek media session to the selected position");
+        }
+        finally
+        {
+            _isDragging = false;
+        }
     }
 
     private void Seekbar_OnLostMouseCapture(object? sender, MouseEventArgs e)
