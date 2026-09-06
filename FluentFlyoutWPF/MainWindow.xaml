@@ -124,10 +124,15 @@
                                     Style="{StaticResource MicaWPF.Styles.TransparentButton}" VerticalAlignment="Center">
                                     <ui:SymbolIcon Name="SymbolBack" Symbol="Previous20" Filled="True"/>
                                 </controls:Button>
+                                <!-- TransparentButton (not AccentedButton): AccentedButton's
+                                     template forces system-blue on hover, which overrode the
+                                     album-art accent Background set in code (#910). We paint
+                                     Background ourselves and dim it on MouseEnter/Leave. -->
                                 <controls:Button
                                     Height="32" Width="32" Name="ControlPlayPause"
                                     Margin="8,0,0,0" Click="PlayPause_Click" Focusable="False"
-                                    Style="{StaticResource MicaWPF.Styles.AccentedButton}" VerticalAlignment="Center">
+                                    Style="{StaticResource MicaWPF.Styles.TransparentButton}" VerticalAlignment="Center"
+                                    CornerRadius="999">
                                     <ui:SymbolIcon Name="SymbolPlayPause" Symbol="Pause16" Filled="True"/>
                                 </controls:Button>
                                 <controls:Button

@@ -107,6 +107,8 @@ public partial class MainWindow : MicaWindow
     private bool _isActive;
     private bool _isDragging;
     private bool _isHiding = true;
+    private SolidColorBrush? _playPauseAccentBrush;
+    private SolidColorBrush? _playPauseHoverBrush;
 
     private LockWindow? lockWindow;
     private DateTime _lastSelfUpdateTimestamp = DateTime.MinValue;
@@ -1708,11 +1710,14 @@ public partial class MainWindow : MicaWindow
                 BackgroundImageStyle2.Visibility = SettingsManager.Current.MediaFlyoutBackgroundBlur == 2 ? Visibility.Visible : Visibility.Collapsed;
                 BackgroundImageStyle3.Visibility = SettingsManager.Current.MediaFlyoutBackgroundBlur == 3 ? Visibility.Visible : Visibility.Collapsed;
 
-                // color play/pause button
+                // color play/pause button + seekbar from album-art accent (or
+                // the system accent fallback BitmapHelper already resolved).
+                // Setting only Background left hover/pressed on the AccentedButton
+                // style (system blue) and left the seekbar unthemed (#910, #516).
                 if (BitmapHelper.SavedDominantColors.Count > 0)
                 {
                     SolidColorBrush brush = BitmapHelper.SavedDominantColors.First();
-                    ControlPlayPause.Background = brush;
+                    ApplyAccentBrush(brush);
                 }
 
                 // acrylic effect setting
@@ -2713,6 +2718,50 @@ public partial class MainWindow : MicaWindow
             })
         );
     }
+
+    /// <summary>
+    /// Paints the play/pause button and the seekbar with the album-art (or
+    /// system) accent brush. Hover is handled by MouseEnter/Leave against a
+    /// TransparentButton style (AccentedButton's template forced system-blue
+    /// on hover, ignoring Background — #910). Seekbar Foreground paints the
+    /// filled track (#516).
+    /// </summary>
+    private void ApplyAccentBrush(SolidColorBrush brush)
+    {
+        _playPauseAccentBrush = brush;
+
+        Color baseColor = brush.Color;
+        var hover = new SolidColorBrush(Color.FromArgb(
+            baseColor.A,
+            (byte)Math.Clamp(baseColor.R + 24, 0, 255),
+            (byte)Math.Clamp(baseColor.G + 24, 0, 255),
+            (byte)Math.Clamp(baseColor.B + 24, 0, 255)));
+        hover.Freeze();
+        _playPauseHoverBrush = hover;
+
+        ControlPlayPause.Background = brush;
+
+        ControlPlayPause.MouseEnter -= ControlPlayPause_MouseEnter;
+        ControlPlayPause.MouseLeave -= ControlPlayPause_MouseLeave;
+        ControlPlayPause.MouseEnter += ControlPlayPause_MouseEnter;
+        ControlPlayPause.MouseLeave += ControlPlayPause_MouseLeave;
+
+        // Default WPF Slider templates use Foreground for the filled track.
+        Seekbar.Foreground = brush;
+    }
+
+    private void ControlPlayPause_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (_playPauseHoverBrush != null)
+            ControlPlayPause.Background = _playPauseHoverBrush;
+    }
+
+    private void ControlPlayPause_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_playPauseAccentBrush != null)
+            ControlPlayPause.Background = _playPauseAccentBrush;
+    }
+
     internal void ToggleBlur()
     {
         if (SettingsManager.Current.MediaFlyoutAcrylicWindowEnabled)
