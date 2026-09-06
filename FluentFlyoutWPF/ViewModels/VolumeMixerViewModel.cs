@@ -292,10 +292,10 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
             }
 
             if (MathF.Abs(MasterVolume - vol) > 0.001f)
-            MasterVolume = vol;
+                MasterVolume = vol;
 
-        if (IsMasterMuted != mute)
-            IsMasterMuted = mute;
+            if (IsMasterMuted != mute)
+                IsMasterMuted = mute;
         }
         catch (Exception ex)
         {
