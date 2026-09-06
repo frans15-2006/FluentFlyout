@@ -1520,8 +1520,13 @@ public partial class MainWindow : MicaWindow
 
                 ControlPlayPause.Opacity = ControlPlayPause.IsEnabled ? 1 : 0.35;
 
-                ControlBack.IsEnabled = ControlForward.IsEnabled = mediaProperties.Controls.IsNextEnabled;
-                ControlBack.Opacity = ControlForward.Opacity = mediaProperties.Controls.IsNextEnabled ? 1 : 0.35;
+                // The taskbar widget gates Previous on IsPreviousEnabled; the
+                // media flyout used IsNextEnabled for both directions, leaving
+                // Back wrongly enabled/disabled on players that report only one.
+                ControlBack.IsEnabled = mediaProperties.Controls.IsPreviousEnabled;
+                ControlForward.IsEnabled = mediaProperties.Controls.IsNextEnabled;
+                ControlBack.Opacity = mediaProperties.Controls.IsPreviousEnabled ? 1 : 0.35;
+                ControlForward.Opacity = mediaProperties.Controls.IsNextEnabled ? 1 : 0.35;
 
                 if (SettingsManager.Current.RepeatEnabled && !SettingsManager.Current.CompactLayout)
                 {
