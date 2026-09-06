@@ -1810,7 +1810,18 @@ public partial class MainWindow : MicaWindow
 
     private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
-        TryTogglePlayPauseAsync();
+        try
+        {
+            if (GetActiveMediaSession() is not { ControlSession: not null }) return;
+
+            await TryTogglePlayPauseAsync();
+        }
+        catch (Exception ex)
+        {
+            // async void: an uncaught throw here (session died between the
+            // click and the command) is unhandled and exits the process.
+            Logger.Error(ex, "Failed to send play/pause command to the media session");
+        }
     }
 
     private async void Forward_Click(object sender, RoutedEventArgs e)
