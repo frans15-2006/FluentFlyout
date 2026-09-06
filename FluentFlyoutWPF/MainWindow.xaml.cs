@@ -1418,19 +1418,19 @@ public partial class MainWindow : MicaWindow
             _alwaysDisplay != SettingsManager.Current.MediaFlyoutAlwaysDisplay)
             UpdateUILayout();
 
-        // sometimes mediaSession.ControlSession can be null
-        if (mediaSession.ControlSession == null)
-            return;
-
-        var controlSession = mediaSession.ControlSession;
-
-        Dispatcher.Invoke(() =>
+        // sometimes mediaSession (or its ControlSession) can be null. A null
+        // session used to NRE right here even though the "No media playing"
+        // reset below was written for exactly that case (it was unreachable).
+        if (mediaSession?.ControlSession == null)
         {
-            UpdateMediaFlyoutCloseButtonVisibility();
-            this.EnableBackdrop(); // ensures the backdrop is enabled as sometimes it gets disabled
+            if (mediaSession != null)
+                return; // session alive but its control died: keep the current UI
 
-            if (mediaSession == null)
+            Dispatcher.Invoke(() =>
             {
+                UpdateMediaFlyoutCloseButtonVisibility();
+                this.EnableBackdrop(); // ensures the backdrop is enabled as sometimes it gets disabled
+
                 SongTitle.Text = "No media playing";
                 SongArtist.Text = string.Empty;
                 SongImage.ImageSource = null;
@@ -1440,8 +1440,16 @@ public partial class MainWindow : MicaWindow
                 ControlBack.IsEnabled = ControlForward.IsEnabled = false;
                 ControlBack.Opacity = ControlForward.Opacity = 0.35;
                 SongInfoStackPanel.ToolTip = string.Empty;
-                return;
-            }
+            });
+            return;
+        }
+
+        var controlSession = mediaSession.ControlSession;
+
+        Dispatcher.Invoke(() =>
+        {
+            UpdateMediaFlyoutCloseButtonVisibility();
+            this.EnableBackdrop(); // ensures the backdrop is enabled as sometimes it gets disabled
 
             var mediaProperties = controlSession.GetPlaybackInfo();
             if (mediaProperties != null)
