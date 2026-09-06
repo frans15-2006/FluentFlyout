@@ -425,7 +425,15 @@ namespace FluentFlyoutWPF.Classes
             // samples: 24-bit streams (common with spatial/Dolby Atmos pipelines)
             // decoded as permanent silence, and 6/8-channel streams fed the FFT
             // at multiples of the real rate. Downmix every frame to mono instead.
-            var waveFormat = _capture!.WaveFormat;
+            //
+            // Stop()/Start() can null or replace _capture while this callback is
+            // mid-flight on the capture thread; snapshot it so a stop/restart
+            // race can't NRE here or let two capture instances interleave.
+            var capture = _capture;
+            if (capture == null)
+                return;
+
+            var waveFormat = capture.WaveFormat;
             int bytesPerSample = waveFormat.BitsPerSample / 8;
             int channels = Math.Max(1, waveFormat.Channels);
             bool isFloat = waveFormat.Encoding == WaveFormatEncoding.IeeeFloat;
@@ -454,7 +462,7 @@ namespace FluentFlyoutWPF.Classes
 
                 // perform FFT
                 _fftPos = 0;
-                ProcessFftData();
+                ProcessFftData(capture.WaveFormat.SampleRate);
 
                 // Update UI with frame rate limiting
                 DateTime now = DateTime.UtcNow;
@@ -493,11 +501,10 @@ namespace FluentFlyoutWPF.Classes
             }
         }
 
-        private void ProcessFftData()
+        private void ProcessFftData(int sampleRate)
         {
             FastFourierTransform.FFT(true, (int)Math.Log(_fftLength, 2.0), _fftBuffer);
 
-            int sampleRate = _capture.WaveFormat.SampleRate;
             double frequencyPerBin = (double)sampleRate / _fftLength;
 
             double minFreq = 40;   // Hz
