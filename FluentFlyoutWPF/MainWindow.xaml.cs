@@ -1813,6 +1813,12 @@ public partial class MainWindow : MicaWindow
         _isDragging = true;
 
         Slider slider = (Slider)sender;
+        // Own the mouse for the whole drag: the PreviewMouseLeftButtonUp handler
+        // only fires when the button is released over the slider, so a release
+        // anywhere else left _isDragging stuck true and froze the seekbar (the
+        // update paths early-return while dragging) until the next complete
+        // press+release on the slider.
+        slider.CaptureMouse();
         System.Windows.Point clickPosition = e.GetPosition(slider);
         double thumbWidth = slider.Template.FindName("Thumb", slider) is Thumb thumb ? thumb.ActualWidth : 0;
         double ratio = (clickPosition.X - thumbWidth / 2) / (slider.ActualWidth - thumbWidth);
@@ -1828,12 +1834,23 @@ public partial class MainWindow : MicaWindow
 
     private async void Seekbar_OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (sender is Slider slider)
+            slider.ReleaseMouseCapture();
+
         if (GetActiveMediaSession() is { } session)
         {
             var seekPosition = TimeSpan.FromSeconds(Seekbar.Value);
             if (seekPosition == TimeSpan.Zero) seekPosition = TimeSpan.FromSeconds(1);
             await session.ControlSession.TryChangePlaybackPositionAsync(seekPosition.Ticks);
         }
+        _isDragging = false;
+    }
+
+    private void Seekbar_OnLostMouseCapture(object? sender, MouseEventArgs e)
+    {
+        // Capture can be lost mid-drag (Alt+Tab, an overlapping window, or the
+        // release itself via the handler above). End the drag so the position
+        // updates suppressed by _isDragging resume.
         _isDragging = false;
     }
 

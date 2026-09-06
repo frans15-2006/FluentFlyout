@@ -177,6 +177,7 @@
                             IsMoveToPointEnabled="True"
                             PreviewMouseLeftButtonDown="Seekbar_OnPreviewMouseLeftButtonDown"
                             PreviewMouseLeftButtonUp="Seekbar_OnPreviewMouseLeftButtonUp"
+                            LostMouseCapture="Seekbar_OnLostMouseCapture"
                             ValueChanged="Seekbar_OnValueChanged"/>
                 </DockPanel>
             </Grid>
