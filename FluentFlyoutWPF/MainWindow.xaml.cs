@@ -974,6 +974,31 @@ public partial class MainWindow : MicaWindow
         storyboard.Begin(window);
     }
 
+    /// <summary>
+    /// Resolves a non-empty display title for a media session. Some players
+    /// (ytmdesktop2, certain UWP SMTC bridges) publish an empty Title while the
+    /// session is otherwise valid; fall back to the resolved process/app name
+    /// so the flyout and taskbar widget aren't blank (#608).
+    /// </summary>
+    private static string ResolveDisplayTitle(MediaSession session, string? title)
+    {
+        if (!string.IsNullOrWhiteSpace(title))
+            return title;
+
+        try
+        {
+            string? appName = MediaPlayerData.GetAndCacheMediaPlayerData(session.Id).Item1;
+            if (!string.IsNullOrWhiteSpace(appName))
+                return appName;
+        }
+        catch
+        {
+            // process lookup can fail for elevated/packaged apps; fall through
+        }
+
+        return string.IsNullOrWhiteSpace(session.Id) ? string.Empty : session.Id;
+    }
+
     public void UpdateTaskbar()
     {
         var activeSession = GetActiveMediaSession();
@@ -990,7 +1015,12 @@ public partial class MainWindow : MicaWindow
         var playbackInfo = TryGetPlaybackInfo(activeSession.ControlSession);
         var thumbnail = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
         BitmapHelper.GetDominantColors(1);
-        taskbarWindow?.UpdateUi(songInfo.Title, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
+        taskbarWindow?.UpdateUi(
+            ResolveDisplayTitle(activeSession, songInfo.Title),
+            songInfo.Artist,
+            thumbnail,
+            playbackInfo?.PlaybackStatus,
+            playbackInfo?.Controls);
     }
 
     public void reportBug(object? sender, EventArgs e)
@@ -1064,7 +1094,12 @@ public partial class MainWindow : MicaWindow
             BitmapHelper.GetDominantColors(1);
             var tbPlayback = TryGetPlaybackInfo(focusedSession.ControlSession);
 
-            taskbarWindow?.UpdateUi(tbSongInfo.Title, tbSongInfo.Artist, tbThumbnail, tbPlayback?.PlaybackStatus, tbPlayback?.Controls);
+            taskbarWindow?.UpdateUi(
+                ResolveDisplayTitle(focusedSession, tbSongInfo.Title),
+                tbSongInfo.Artist,
+                tbThumbnail,
+                tbPlayback?.PlaybackStatus,
+                tbPlayback?.Controls);
         }
 
         if (IsVisible)
@@ -1115,9 +1150,15 @@ public partial class MainWindow : MicaWindow
         // album art with no title/artist until the song was changed manually,
         // and poisoned the dedupe cache so the real update was suppressed
         // (#961). Ignore the blank interim state while the session is alive.
+        // Only suppress blank interim metadata when we already have a non-blank
+        // title cached for this session. Players that never publish a title
+        // (ytmdesktop2, #608) must still fall through so ResolveDisplayTitle
+        // can show the process name.
         if (string.IsNullOrWhiteSpace(songInfo.Title) && string.IsNullOrWhiteSpace(songInfo.Artist)
             && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed
-            && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)
+            && playbackInfo?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped
+            && previousMediaProperty.StartsWith(mediaSession.Id + "\0", StringComparison.Ordinal)
+            && previousMediaProperty.Length > mediaSession.Id.Length + 1)
         {
             return;
         }
@@ -1141,7 +1182,8 @@ public partial class MainWindow : MicaWindow
         var thumbnail = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
         BitmapHelper.GetDominantColors(1);
 
-        taskbarWindow?.UpdateUi(songInfo.Title, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
+        string displayTitle = ResolveDisplayTitle(currentActiveSession, songInfo.Title);
+        taskbarWindow?.UpdateUi(displayTitle, songInfo.Artist, thumbnail, playbackInfo?.PlaybackStatus, playbackInfo?.Controls);
 
         pauseOtherMediaSessionsIfNeeded(mediaSession);
 
@@ -1688,15 +1730,21 @@ public partial class MainWindow : MicaWindow
 
             if (songInfo != null)
             {
-                SongTitle.Text = songInfo.Title;
-                SongArtist.Text = songInfo.Artist;
+                // Some players (ytmdesktop2, certain UWP bridges) publish an empty
+                // Title while still exposing a valid session. Fall back to the
+                // resolved process/app display name so the flyout isn't blank (#608).
+                string displayTitle = ResolveDisplayTitle(mediaSession, songInfo.Title);
+                string displayArtist = songInfo.Artist ?? string.Empty;
+
+                SongTitle.Text = displayTitle;
+                SongArtist.Text = displayArtist;
                 var image = BitmapHelper.GetThumbnail(songInfo.Thumbnail);
                 SongImage.ImageSource = image;
 
                 // set tooltip
                 SongInfoStackPanel.ToolTip = string.Empty;
-                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(songInfo.Title) ? songInfo.Title : string.Empty;
-                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(songInfo.Artist) ? "\n\n" + songInfo.Artist : string.Empty;
+                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(displayTitle) ? displayTitle : string.Empty;
+                SongInfoStackPanel.ToolTip += !String.IsNullOrEmpty(displayArtist) ? "\n\n" + displayArtist : string.Empty;
 
                 // background blurred image
                 if (SettingsManager.Current.MediaFlyoutBackgroundBlur != 0)
