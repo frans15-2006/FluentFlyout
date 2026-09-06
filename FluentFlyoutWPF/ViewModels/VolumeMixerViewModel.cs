@@ -284,15 +284,11 @@ public partial class VolumeMixerViewModel : ObservableObject, IDisposable
         if (_device == null) return;
         try
         {
+            // Mute is an independent toggle: the native Windows mixer never
+            // flips mute from the volume slider, and forcing IsMuted to follow
+            // Volume==0 made the OSD show the muted icon and left the device
+            // silent when unmuting at volume 0.
             _device.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Clamp(value, 0f, 1f);
-            if (MasterVolume == 0f)
-            {
-                IsMasterMuted = true;
-            }
-            else
-            {
-                IsMasterMuted = false;
-            }
         }
         catch (Exception ex)
         {

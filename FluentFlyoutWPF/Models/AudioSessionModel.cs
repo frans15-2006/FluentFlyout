@@ -67,15 +67,10 @@ public partial class AudioSessionModel : ObservableObject
             return; // keep the stale in-memory value
         }
 
-        if (Volume == 0f)
-        {
-            IsMuted = true;
-        }
-        else
-        {
-            IsMuted = false;
-        }
-
+        // Mute is an independent toggle: forcing IsMuted to follow Volume==0
+        // made a dragged-to-zero slider flip the session's mute flag and flip
+        // it back on the way up, desyncing the mixer row from the real
+        // session state (SetVolume syncs IsMuted from the session instead).
         VolumeChanged?.Invoke(this, EventArgs.Empty);
     }
 
