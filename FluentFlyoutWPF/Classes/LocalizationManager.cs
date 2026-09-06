@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2024-2026 The FluentFlyout Authors
+// Copyright (c) 2024-2026 The FluentFlyout Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 using FluentFlyout.Classes.Settings;
@@ -141,15 +141,15 @@ public static class LocalizationManager
         //Calculate the Lock Key Flyout text's Max Lenght
         List<double> Lengths = new List<double>();
 
-        Lengths.Add(StringWidth.GetStringWidth(Application.Current.TryFindResource("LockWindow_InsertPressed").ToString() ?? string.Empty));
+        Lengths.Add(StringWidth.GetStringWidth(Application.Current.TryFindResource("LockWindow_InsertPressed")?.ToString() ?? string.Empty));
 
         var On = Application.Current.TryFindResource("LockWindow_LockOn")?.ToString() ?? string.Empty;
         var Off = Application.Current.TryFindResource("LockWindow_LockOff")?.ToString() ?? string.Empty;
         var OnOffMax = On.Length >= Off.Length ? On + " " : Off + " ";
 
-        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_CapsLock").ToString() ?? string.Empty));
-        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_NumLock").ToString() ?? string.Empty));
-        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_ScrollLock").ToString() ?? string.Empty));
+        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_CapsLock")?.ToString() ?? string.Empty));
+        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_NumLock")?.ToString() ?? string.Empty));
+        Lengths.Add(StringWidth.GetStringWidth(OnOffMax + Application.Current.TryFindResource("LockWindow_ScrollLock")?.ToString() ?? string.Empty));
 
         maxLength = Lengths.Max() + 8; // additional margin to avoid text clipping
 
